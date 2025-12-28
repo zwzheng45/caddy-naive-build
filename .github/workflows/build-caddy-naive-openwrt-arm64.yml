@@ -30,34 +30,40 @@ jobs:
       - name: Install xcaddy
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
-      - name: Build caddy with naive forwardproxy (linux/arm64)
+      - name: Build amd64 (self-check on runner)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          set -eux
+          mkdir -p dist
+          VER="${{ inputs.caddy_version }}"
+          xcaddy build ${VER:-} \
+            --output dist/caddy-naive-linux-amd64 \
+            --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive
+
+          ./dist/caddy-naive-linux-amd64 version
+          ./dist/caddy-naive-linux-amd64 list-modules | grep -E 'http.handlers.forward_proxy|forward_proxy'
+
+      - name: Build arm64 (artifact for OpenWrt)
         env:
           GOOS: linux
           GOARCH: arm64
           CGO_ENABLED: "0"
         run: |
           set -eux
-          mkdir -p dist
-
           VER="${{ inputs.caddy_version }}"
-          if [ -n "$VER" ]; then
-            echo "Building Caddy version: $VER"
-          else
-            echo "Building latest Caddy (xcaddy default)"
-          fi
-
           xcaddy build ${VER:-} \
             --output dist/caddy-naive-linux-arm64 \
             --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive
 
-          # 基本自检：能运行、并且包含 forward_proxy handler
-          ./dist/caddy-naive-linux-arm64 version
-          ./dist/caddy-naive-linux-arm64 list-modules | grep -E 'http.handlers.forward_proxy|forward_proxy'
+          # 不能执行 arm64，但可以检查文件头，确认架构
+          file dist/caddy-naive-linux-arm64
+          # 你也可以加一条更硬的检查：
+          readelf -h dist/caddy-naive-linux-arm64 | grep -E 'Machine:|Class:'
 
-          # 看看文件头，确认是 ARM64 ELF
-          file ./dist/caddy-naive-linux-arm64
-
-      - name: Strip + package + sha256
+      - name: Package arm64 + sha256
         run: |
           set -eux
           cd dist
