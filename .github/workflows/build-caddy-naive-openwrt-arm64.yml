@@ -1,0 +1,82 @@
+name: Build caddy-naive for OpenWrt (arm64/aarch64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      caddy_version:
+        description: "可选：指定 Caddy 版本（如 v2.8.4）；留空则用 xcaddy 默认最新"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "caddy-naive-openwrt-v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+          check-latest: true
+
+      - name: Install xcaddy
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+      - name: Build caddy with naive forwardproxy (linux/arm64)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          set -eux
+          mkdir -p dist
+
+          VER="${{ inputs.caddy_version }}"
+          if [ -n "$VER" ]; then
+            echo "Building Caddy version: $VER"
+          else
+            echo "Building latest Caddy (xcaddy default)"
+          fi
+
+          xcaddy build ${VER:-} \
+            --output dist/caddy-naive-linux-arm64 \
+            --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive
+
+          # 基本自检：能运行、并且包含 forward_proxy handler
+          ./dist/caddy-naive-linux-arm64 version
+          ./dist/caddy-naive-linux-arm64 list-modules | grep -E 'http.handlers.forward_proxy|forward_proxy'
+
+          # 看看文件头，确认是 ARM64 ELF
+          file ./dist/caddy-naive-linux-arm64
+
+      - name: Strip + package + sha256
+        run: |
+          set -eux
+          cd dist
+          strip -s caddy-naive-linux-arm64 || true
+          tar -czf caddy-naive-linux-arm64.tar.gz caddy-naive-linux-arm64
+          sha256sum caddy-naive-linux-arm64.tar.gz > caddy-naive-linux-arm64.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caddy-naive-openwrt-arm64
+          path: |
+            dist/caddy-naive-linux-arm64.tar.gz
+            dist/caddy-naive-linux-arm64.tar.gz.sha256
+
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/caddy-naive-linux-arm64.tar.gz
+            dist/caddy-naive-linux-arm64.tar.gz.sha256
