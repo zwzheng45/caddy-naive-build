@@ -9,7 +9,7 @@ on:
         default: ""
   push:
     tags:
-      - "caddy-naive-openwrt-v*"
+      - "caddy-naive-openwrt-build*"
 
 jobs:
   build:
