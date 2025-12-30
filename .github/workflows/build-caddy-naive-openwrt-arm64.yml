@@ -1,4 +1,4 @@
-name: Build caddy-naive for OpenWrt (arm64/aarch64)
+name: Build caddy (naive + udpinhttp) for OpenWrt (arm64/aarch64)
 
 on:
   workflow_dispatch:
@@ -30,7 +30,10 @@ jobs:
       - name: Install xcaddy
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 
-      - name: Build amd64 (self-check on runner)
+      # -------------------------
+      # amd64: self-check on runner
+      # -------------------------
+      - name: Build amd64 (naive self-check on runner)
         env:
           GOOS: linux
           GOARCH: amd64
@@ -46,38 +49,82 @@ jobs:
           ./dist/caddy-naive-linux-amd64 version
           ./dist/caddy-naive-linux-amd64 list-modules | grep -E 'http.handlers.forward_proxy|forward_proxy'
 
-      - name: Build arm64 (artifact for OpenWrt)
+      - name: Build amd64 (udpinhttp self-check on runner)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          set -eux
+          mkdir -p dist
+          VER="${{ inputs.caddy_version }}"
+          xcaddy build ${VER:-} \
+            --output dist/caddy-udpinhttp-linux-amd64 \
+            --with github.com/caddyserver/forwardproxy=github.com/imgk/forwardproxy@udpinhttp
+
+          ./dist/caddy-udpinhttp-linux-amd64 version
+          ./dist/caddy-udpinhttp-linux-amd64 list-modules | grep -E 'http.handlers.forward_proxy|forward_proxy'
+
+      # -------------------------
+      # arm64: OpenWrt artifact
+      # -------------------------
+      - name: Build arm64 (naive artifact for OpenWrt)
         env:
           GOOS: linux
           GOARCH: arm64
           CGO_ENABLED: "0"
         run: |
           set -eux
+          mkdir -p dist
           VER="${{ inputs.caddy_version }}"
           xcaddy build ${VER:-} \
             --output dist/caddy-naive-linux-arm64 \
             --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive
 
-          # 不能执行 arm64，但可以检查文件头，确认架构
           file dist/caddy-naive-linux-arm64
-          # 你也可以加一条更硬的检查：
           readelf -h dist/caddy-naive-linux-arm64 | grep -E 'Machine:|Class:'
 
-      - name: Package arm64 + sha256
+      - name: Build arm64 (udpinhttp artifact for OpenWrt)
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          set -eux
+          mkdir -p dist
+          VER="${{ inputs.caddy_version }}"
+          xcaddy build ${VER:-} \
+            --output dist/caddy-udpinhttp-linux-arm64 \
+            --with github.com/caddyserver/forwardproxy=github.com/imgk/forwardproxy@udpinhttp
+
+          file dist/caddy-udpinhttp-linux-arm64
+          readelf -h dist/caddy-udpinhttp-linux-arm64 | grep -E 'Machine:|Class:'
+
+      # -------------------------
+      # package + sha256
+      # -------------------------
+      - name: Package arm64 (both) + sha256
         run: |
           set -eux
           cd dist
+
           strip -s caddy-naive-linux-arm64 || true
           tar -czf caddy-naive-linux-arm64.tar.gz caddy-naive-linux-arm64
           sha256sum caddy-naive-linux-arm64.tar.gz > caddy-naive-linux-arm64.tar.gz.sha256
 
+          strip -s caddy-udpinhttp-linux-arm64 || true
+          tar -czf caddy-udpinhttp-linux-arm64.tar.gz caddy-udpinhttp-linux-arm64
+          sha256sum caddy-udpinhttp-linux-arm64.tar.gz > caddy-udpinhttp-linux-arm64.tar.gz.sha256
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: caddy-naive-openwrt-arm64
+          name: caddy-openwrt-arm64
           path: |
             dist/caddy-naive-linux-arm64.tar.gz
             dist/caddy-naive-linux-arm64.tar.gz.sha256
+            dist/caddy-udpinhttp-linux-arm64.tar.gz
+            dist/caddy-udpinhttp-linux-arm64.tar.gz.sha256
 
       - name: Create GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
@@ -86,3 +133,5 @@ jobs:
           files: |
             dist/caddy-naive-linux-arm64.tar.gz
             dist/caddy-naive-linux-arm64.tar.gz.sha256
+            dist/caddy-udpinhttp-linux-arm64.tar.gz
+            dist/caddy-udpinhttp-linux-arm64.tar.gz.sha256
